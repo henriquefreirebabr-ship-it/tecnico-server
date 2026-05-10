@@ -7,35 +7,31 @@ const PORT = process.env.PORT || 3000;
 const BASE44_API_KEY = process.env.BASE44_API_KEY || '';
 const APP_ID = '69ecdce9d344ba3f09910fa1';
 
-// Tenta as duas URLs possíveis do Base44
 async function base44Fetch(path, options = {}) {
-  const urls = [
-    `https://api.base44.com/api/apps/${APP_ID}${path}`,
-    `https://app.base44.com/api/apps/${APP_ID}${path}`,
-  ];
-  let lastErr = '';
-  for (const url of urls) {
-    try {
-      const res = await fetch(url, {
-        ...options,
-        headers: { 'x-api-key': BASE44_API_KEY, 'Content-Type': 'application/json', ...(options.headers || {}) }
-      });
-      const text = await res.text();
-      console.log(`[${url}] status: ${res.status}, body: ${text.substring(0, 200)}`);
-      if (res.ok) return JSON.parse(text);
-      lastErr = `Status ${res.status}: ${text}`;
-    } catch(e) {
-      lastErr = e.message;
-      console.error(`Erro em ${url}:`, e.message);
+  const url = `https://api.base44.com/api/apps/${APP_ID}${path}`;
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      'api-key': BASE44_API_KEY,
+      'x-api-key': BASE44_API_KEY,
+      'Authorization': `Bearer ${BASE44_API_KEY}`,
+      'Content-Type': 'application/json',
+      ...(options.headers || {})
     }
-  }
-  throw new Error(lastErr);
+  });
+  const text = await res.text();
+  console.log(`[${path}] status: ${res.status}, body: ${text.substring(0, 300)}`);
+  if (!res.ok) throw new Error(`Status ${res.status}: ${text}`);
+  return JSON.parse(text);
 }
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '10mb' }));
 
-app.get('/', (req, res) => res.json({ status: 'Speed Técnico API rodando!', key: BASE44_API_KEY ? 'configurada' : 'AUSENTE' }));
+app.get('/', (req, res) => res.json({ 
+  status: 'Speed Técnico API rodando!', 
+  key: BASE44_API_KEY ? `configurada (${BASE44_API_KEY.substring(0,8)}...)` : 'AUSENTE' 
+}));
 
 // LOGIN
 app.post('/tecnico/login', async (req, res) => {
@@ -49,7 +45,7 @@ app.post('/tecnico/login', async (req, res) => {
     const users = data.entities || [];
     console.log('Users found:', users.length);
 
-    if (users.length === 0) return res.status(401).json({ error: 'Usuário não encontrado. Email: ' + email });
+    if (users.length === 0) return res.status(401).json({ error: 'Usuário não encontrado' });
     const user = users[0];
     if (!user.senha_app) return res.status(401).json({ error: 'Senha não cadastrada. Fale com o supervisor.' });
     if (user.senha_app !== senha) return res.status(401).json({ error: 'Senha incorreta' });
