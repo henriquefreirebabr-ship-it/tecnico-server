@@ -6,17 +6,39 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const BASE44_API_KEY = process.env.BASE44_API_KEY || '';
 const APP_ID = '69ecdce9d344ba3f09910fa1';
-
-// URL correta da API do Base44
 const BASE44_URL = `https://app.base44.com/api/apps/${APP_ID}`;
 
+// Pegar token de acesso do Base44 usando a API key
+let cachedToken = null;
+let tokenExpiry = 0;
+
+async function getToken() {
+  if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
+  
+  const res = await fetch(`https://app.base44.com/api/auth/api-key`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_key: BASE44_API_KEY })
+  });
+  const text = await res.text();
+  console.log('Token response:', res.status, text.substring(0, 200));
+  
+  if (!res.ok) throw new Error('Falha ao obter token: ' + text);
+  const data = JSON.parse(text);
+  cachedToken = data.token || data.access_token;
+  tokenExpiry = Date.now() + 3600000; // 1 hora
+  return cachedToken;
+}
+
 async function base44Fetch(path, options = {}) {
+  const token = await getToken();
   const url = `${BASE44_URL}${path}`;
   console.log('Fetching:', url);
+  
   const res = await fetch(url, {
     ...options,
     headers: {
-      'api-key': BASE44_API_KEY,
+      'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json',
       ...(options.headers || {})
     }
@@ -30,10 +52,14 @@ async function base44Fetch(path, options = {}) {
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '10mb' }));
 
-app.get('/', (req, res) => res.json({ 
-  status: 'Speed Técnico API rodando!',
-  key: BASE44_API_KEY ? `configurada (${BASE44_API_KEY.substring(0,8)}...)` : 'AUSENTE'
-}));
+app.get('/', async (req, res) => {
+  try {
+    const token = await getToken();
+    res.json({ status: 'Speed Técnico API rodando!', auth: token ? 'OK' : 'FALHOU' });
+  } catch(e) {
+    res.json({ status: 'Rodando mas sem auth', error: e.message });
+  }
+});
 
 // LOGIN
 app.post('/tecnico/login', async (req, res) => {
@@ -61,13 +87,9 @@ app.post('/tecnico/login', async (req, res) => {
 app.get('/tecnico/ordens', async (req, res) => {
   try {
     const { email, role } = req.query;
-    let path;
-    if (role === 'gestor') {
-      path = `/entities/ServiceOrder?limit=200&sort=-created_date`;
-    } else {
-      const q = encodeURIComponent(JSON.stringify({ assigned_technician_email: email }));
-      path = `/entities/ServiceOrder?query=${q}&limit=200&sort=-created_date`;
-    }
+    let path = role === 'gestor'
+      ? `/entities/ServiceOrder?limit=200&sort=-created_date`
+      : `/entities/ServiceOrder?query=${encodeURIComponent(JSON.stringify({ assigned_technician_email: email }))}&limit=200&sort=-created_date`;
     const data = await base44Fetch(path);
     res.json({ entities: data.entities || data || [] });
   } catch(e) {
