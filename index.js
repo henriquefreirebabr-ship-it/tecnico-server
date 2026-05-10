@@ -7,20 +7,22 @@ const PORT = process.env.PORT || 3000;
 const BASE44_API_KEY = process.env.BASE44_API_KEY || '';
 const APP_ID = '69ecdce9d344ba3f09910fa1';
 
+// URL correta da API do Base44
+const BASE44_URL = `https://app.base44.com/api/apps/${APP_ID}`;
+
 async function base44Fetch(path, options = {}) {
-  const url = `https://api.base44.com/api/apps/${APP_ID}${path}`;
+  const url = `${BASE44_URL}${path}`;
+  console.log('Fetching:', url);
   const res = await fetch(url, {
     ...options,
     headers: {
       'api-key': BASE44_API_KEY,
-      'x-api-key': BASE44_API_KEY,
-      'Authorization': `Bearer ${BASE44_API_KEY}`,
       'Content-Type': 'application/json',
       ...(options.headers || {})
     }
   });
   const text = await res.text();
-  console.log(`[${path}] status: ${res.status}, body: ${text.substring(0, 300)}`);
+  console.log(`Status: ${res.status}, body: ${text.substring(0, 300)}`);
   if (!res.ok) throw new Error(`Status ${res.status}: ${text}`);
   return JSON.parse(text);
 }
@@ -29,21 +31,19 @@ app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '10mb' }));
 
 app.get('/', (req, res) => res.json({ 
-  status: 'Speed Técnico API rodando!', 
-  key: BASE44_API_KEY ? `configurada (${BASE44_API_KEY.substring(0,8)}...)` : 'AUSENTE' 
+  status: 'Speed Técnico API rodando!',
+  key: BASE44_API_KEY ? `configurada (${BASE44_API_KEY.substring(0,8)}...)` : 'AUSENTE'
 }));
 
 // LOGIN
 app.post('/tecnico/login', async (req, res) => {
   try {
     const { email, senha } = req.body;
-    console.log('Login attempt:', email);
     if (!email || !senha) return res.status(400).json({ error: 'Email e senha obrigatórios' });
 
     const q = encodeURIComponent(JSON.stringify({ user_email: email.toLowerCase().trim() }));
     const data = await base44Fetch(`/entities/UsuariosApp?query=${q}&limit=10`);
     const users = data.entities || [];
-    console.log('Users found:', users.length);
 
     if (users.length === 0) return res.status(401).json({ error: 'Usuário não encontrado' });
     const user = users[0];
