@@ -4,53 +4,54 @@ const fetch = (...args) => import('node-fetch').then(({default: f}) => f(...args
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const BASE44_API_KEY = process.env.BASE44_API_KEY || '';
 const APP_ID = '69ecdce9d344ba3f09910fa1';
-const BASE44_URL = `https://app.base44.com/api/apps/${APP_ID}`;
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || '';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 
-let cachedToken = null;
-let tokenExpiry = 0;
-
-async function getToken() {
-  if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
-  console.log('Logging in as admin...');
-  const res = await fetch(`${BASE44_URL}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD })
-  });
-  const text = await res.text();
-  console.log('Auth response:', res.status, text.substring(0, 300));
-  if (!res.ok) throw new Error('Auth falhou: ' + text);
-  const data = JSON.parse(text);
-  cachedToken = data.token || data.access_token;
-  tokenExpiry = Date.now() + 3500000;
-  return cachedToken;
-}
-
+// Tenta todos os formatos de autenticação possíveis do Base44
 async function base44Fetch(path, options = {}) {
-  const token = await getToken();
-  const url = `${BASE44_URL}${path}`;
-  const res = await fetch(url, {
-    ...options,
-    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', ...(options.headers || {}) }
-  });
-  const text = await res.text();
-  console.log(`[${path}] ${res.status}: ${text.substring(0, 200)}`);
-  if (!res.ok) throw new Error(`Status ${res.status}: ${text}`);
-  return JSON.parse(text);
+  const bases = [
+    `https://app.base44.com/api/apps/${APP_ID}`,
+    `https://api.base44.com/api/apps/${APP_ID}`,
+  ];
+  const headerSets = [
+    { 'api-key': BASE44_API_KEY },
+    { 'X-API-Key': BASE44_API_KEY },
+    { 'Authorization': `Api-Key ${BASE44_API_KEY}` },
+    { 'Authorization': `apikey ${BASE44_API_KEY}` },
+  ];
+
+  for (const base of bases) {
+    for (const authHeaders of headerSets) {
+      try {
+        const res = await fetch(`${base}${path}`, {
+          ...options,
+          headers: { 'Content-Type': 'application/json', ...authHeaders, ...(options.headers || {}) }
+        });
+        const text = await res.text();
+        console.log(`[${base}${path}] headers:${JSON.stringify(authHeaders)} status:${res.status} body:${text.substring(0,100)}`);
+        if (res.ok) return JSON.parse(text);
+        if (res.status === 403 || res.status === 401) continue; // tenta próximo
+        throw new Error(`Status ${res.status}: ${text}`);
+      } catch(e) {
+        if (e.message.startsWith('Status')) throw e;
+        continue;
+      }
+    }
+  }
+  throw new Error('Todas as tentativas de autenticação falharam');
 }
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '10mb' }));
 
-app.get('/', async (req, res) => {
+app.get('/', (req, res) => res.json({ status: 'Speed Técnico API rodando!', key: BASE44_API_KEY ? 'configurada' : 'AUSENTE' }));
+
+app.get('/test', async (req, res) => {
   try {
-    await getToken();
-    res.json({ status: 'Speed Técnico API rodando!', auth: 'OK' });
+    const data = await base44Fetch('/entities/UsuariosApp?limit=1');
+    res.json({ success: true, data });
   } catch(e) {
-    res.json({ status: 'Rodando', auth: 'FALHOU: ' + e.message });
+    res.json({ success: false, error: e.message });
   }
 });
 
